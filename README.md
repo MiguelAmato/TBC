@@ -12,3 +12,7 @@ Primeros pasos con el entorno Remix y con Solidity.
 ## Practica 3
 
 Introducción a los Arrays y a mapping
+
+## Practica 4
+
+Sistema de elecciones simple, aprendimos visibilidad, herencia y polimorfismo en Contratos 
