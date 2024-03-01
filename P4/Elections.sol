@@ -45,6 +45,8 @@ abstract contract PollingStation {
 
     constructor(address _president) {
         president = _president;
+        votingOpen = false;
+        votingFinished = false;
     }
 
     modifier execPresident {
@@ -58,12 +60,12 @@ abstract contract PollingStation {
     }
 
     function openVoting() external execPresident {
-        require(votingOpen, "error (openVoting)"); 
+        require(!votingOpen, "error (openVoting)"); 
         votingOpen = true;
     }
 
     function closeVoting() external execPresident {
-        require(votingFinished, "error (closeVoting)");
+        require(!votingFinished, "error (closeVoting)");
         votingOpen = false;
         votingFinished = true;
     }
@@ -83,7 +85,7 @@ contract DhontPollingStation is DhontElectionRegion, PollingStation {
     }
 
     function getResults() external view override returns(uint[] memory) {
-        require(!votingFinished, "error (getResults)");
+        require(votingFinished, "error (getResults)");
         return results;
     }
 }
