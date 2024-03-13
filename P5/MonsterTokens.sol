@@ -26,8 +26,26 @@ library ArrayUtils {
     }
 }
 
+interface ERC721simplified{
 
-contract MonsterTokens {
+    //Sacado de https://eips.ethereum.org/EIPS/eip-721
+
+    event Approval(address indexed _owner, address indexed _approved, uint256 indexed _tokenId); 
+    event Transfer(address indexed _from, address indexed _to, uint256 indexed _tokenId);
+
+    function approve(address _approved, uint256 _tokenId) external payable;
+
+    function transferFrom(address _from, address _to, uint256 _tokenId) external payable;
+
+    function balanceOf(address _owner) external view returns (uint256);
+    function ownerOf(uint256 _tokenId) external view returns (address);
+    function getApproved(uint256 _tokenId) external view returns (address);
+
+
+}
+
+
+contract MonsterTokens is ERC721simplified{
 
     struct Weapons {
         string[] names; // name of the weapon
@@ -36,59 +54,115 @@ contract MonsterTokens {
     struct Character {
         string name; // character name
         Weapons weapons; // weapons assigned to this character
+        address tokenOwner; // address of the token owner
     }
 
-    address private autoridad;
+    address payable authority;
 
     uint constant INIT = 10001;
     uint private nextToken;
 
-    mapping(uint=>Character) private personajes;
+    mapping(uint=>Character) private characters;
+    mapping(uint => address) approvedMap; // (TokenId -> address) mapa de tokensId que almacena la direccion que tiene permiso para usarlo
 
     constructor(){
-        autoridad = msg.sender;
+        authority = payable(msg.sender);
         nextToken = INIT;
     }
 
     modifier onlyAuthority {
-        require(msg.sender == autoridad, "No authority");
+        require(msg.sender == authority, "No authority");
         _;
     }
 
     modifier AddrDistZero(address a) {
-        require(a != address(0), "No authority");
+        require(a != address(0), "Address can not be zero");
         _;
     }
 
     function createMonsterToken(string calldata _name, address dir) external onlyAuthority AddrDistZero(dir) returns (uint ID) {
-        require(bytes(_name).length > 0, "Nombre Invalido");
+        require(bytes(_name).length > 0, "Invalid Name");
         ID = nextToken;
-        personajes[ID] = Character({name: _name, weapons: Weapons({names : new string[](0), firePowers : new uint[](0)})});
+        characters[ID] = Character({name: _name, weapons: Weapons({names : new string[](0), firePowers : new uint[](0)}), tokenOwner: dir});
         nextToken++;
     }
 
-    modifier TokenOwner {
-        require(true,"");
+    modifier TokenOwner(uint tokenId) {
+        require(msg.sender == characters[tokenId].tokenOwner ,"Must be the tokenOwner");
         _;
     }
 
     modifier ValidToken(uint token){
-        require((token > INIT && token < nextToken), "Token no valido");
+        require((token >= INIT && token < nextToken), "Invalid Token");
         _;
     }
 
-    function addWeapon(uint tokenId, string calldata nWeapon, uint fPower) external TokenOwner ValidToken(tokenId) {
-        require(bytes(nWeapon).length > 0, "Nombre Invalido");
-        require(!ArrayUtils.contains(personajes[tokenId].weapons.names, nWeapon), "Existe Arma");
+    modifier ApprovedOrTokenOwner(uint tokenID){
+        require((approvedMap[tokenID] == msg.sender) || 
+                    (msg.sender == characters[tokenID].tokenOwner), "Must be the tokenOwner or Approved address");
+        _;
+    }
 
-        personajes[tokenId].weapons.names.push(nWeapon);
-        personajes[tokenId].weapons.firePowers.push(fPower);
+    function addWeapon(uint tokenId, string calldata nWeapon, uint fPower) external ApprovedOrTokenOwner(tokenId) ValidToken(tokenId) {
+        require(bytes(nWeapon).length > 0, "Invalid Weapon Name");
+        require(!ArrayUtils.contains(characters[tokenId].weapons.names, nWeapon), "Weapon alredy exists");
+
+        characters[tokenId].weapons.names.push(nWeapon);
+        characters[tokenId].weapons.firePowers.push(fPower);
     }
 
     function incrementFirePower(uint tokenId, uint8 p) external ValidToken(tokenId){
-        require(p >= 0, "porcentaje negativo"); // permitimos aumentar un 0%
+        require(p >= 0, "porcentage must be >= 0"); // permitimos aumentar un 0%
 
-        ArrayUtils.increment(personajes[tokenId].weapons.firePowers, p);
+        ArrayUtils.increment(characters[tokenId].weapons.firePowers, p);
+    }
+
+    function collectProfits() external onlyAuthority {
+        authority.transfer(address(this).balance);
+    }
+
+    // Interface Functions
+
+    modifier EnoughValue(uint _tokenId){
+        require(msg.value >= ArrayUtils.sum(characters[_tokenId].weapons.firePowers), "Not enough weis");
+        _;
+    }
+
+    function approve(address _approved, uint256 _tokenId) external payable override ValidToken(_tokenId) TokenOwner(_tokenId) EnoughValue(_tokenId){
+        approvedMap[_tokenId] = _approved; // añadimos la nueva address que puede usar el token
+
+        emit Approval(msg.sender, _approved, _tokenId);
+    }
+
+    function transferFrom(address _from, address _to, uint256 _tokenId) external payable override ValidToken(_tokenId) ApprovedOrTokenOwner(_tokenId)
+     EnoughValue(_tokenId) AddrDistZero(_from) AddrDistZero(_to) {
+        require(characters[_tokenId].tokenOwner == _from, "_from must be the address of the token");
+
+        approvedMap[_tokenId] = address(0);
+        characters[_tokenId].tokenOwner = _to; //el token pasa a pertenecer a _to
+
+        emit Transfer(_from, _to, _tokenId);
+    }
+
+    function balanceOf(address _owner) external view override AddrDistZero(_owner) returns (uint256 balance){
+        uint ID = INIT;
+        Character memory c = characters[ID];
+        balance = 0;
+
+        while(ID < nextToken){
+            if(c.tokenOwner == _owner) balance++;
+            ID++;
+            c = characters[ID];
+        }
+
+    }
+    function ownerOf(uint256 _tokenId) external view override ValidToken(_tokenId) returns (address){
+        Character memory c = characters[_tokenId];
+        require(c.tokenOwner != address(0), "_tokenId must be different to zero");
+        return c.tokenOwner;
+    }
+    function getApproved(uint256 _tokenId) external view override ValidToken(_tokenId) returns (address){
+        return approvedMap[_tokenId]; // si no hay ninguna direccion devolvera address(0) que es como esta inicializado por defecto el mapa
     }
 
 }
