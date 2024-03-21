@@ -59,7 +59,7 @@ tag 1			DX
       DUP1 			License-I
       ISZERO 			DX
       PUSH [tag] 4			DX
-      JUMPI 			DX
+      JUMPI 			DX //tag 1b
       PUSH 0			L
       DUP1 			 
       REVERT 			tifier: GPL-
@@ -98,7 +98,7 @@ tag 1			DX
       DUP1 			License-I
       ISZERO 			DX
       PUSH [tag] 7			DX
-      JUMPI 			DX
+      JUMPI 			DX // tag 5b
       PUSH 0			L
       DUP1 			 
       REVERT 			tifier: GPL-
@@ -124,7 +124,7 @@ tag 1			DX
       LT 			i < n
       ISZERO 			for(uint i = 0; i < n; i++){\r...
       PUSH [tag] 12			for(uint i = 0; i < n; i++){\r...
-      JUMPI 			for(uint i = 0; i < n; i++){\r...
+      JUMPI 			for(uint i = 0; i < n; i++){\r...  //tag 11b
       PUSH 0			arr
       DUP2 			i
       DUP3 			i
@@ -201,7 +201,7 @@ tag 1			DX
       LT 			i < arr.length
       ISZERO 			for (uint i = 0; i < arr.lengt...
       PUSH [tag] 17			for (uint i = 0; i < arr.lengt...
-      JUMPI 			for (uint i = 0; i < arr.lengt...
+      JUMPI 			for (uint i = 0; i < arr.lengt... //tag 16b
       PUSH 0			arr
       DUP2 			i
       DUP2 			arr[i]
@@ -243,5 +243,5 @@ tag 1			DX
     tag 17			for (uint i = 0; i < arr.lengt...
       JUMPDEST 			for (uint i = 0; i < arr.lengt...
       POP 			function computeSum() external...
-      JUMP [out]			function computeSum() external...
+      JUMP [out]			function computeSum() external... //tag 17b
     .data
