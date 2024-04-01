@@ -2,35 +2,41 @@
 pragma solidity >=0.7.0 <0.8.0;
 
 contract lab6ex6 {
-    uint [] public arr;
+    uint[] private  arr;
 
     function generate(uint n) external {
         bytes32 b = keccak256("seed");
-        for(uint i = 0; i<n; i++){
+        for (uint i = 0; i < n; i++) {
             uint8 number = uint8(b[i % 32]);
             arr.push(number);
         }
     }
 
-    function getArr() public view returns (uint[] memory){
-       return arr;
+    function getArr() public view returns (uint[] memory) {
+        return arr;
     }
 
+
     function maxMinStorage() public view returns (uint maxmin) {
+
+        uint256 s;
+
+        assembly{
+            s := arr.slot
+        }
+
+        bytes32 loc = keccak256(abi.encode(s));
+
         assembly {
             //no se si es asi, muy parecido al anterior
-            function fmaxmin(slot) -> maxVal, minVal {
+            function fmaxmin(slot, n) -> maxVal, minVal {
+                let len := sload(n)
+                maxVal := sload(slot)
+                minVal := sload(slot)
 
-                let len := sload(slot) // cargamos de memoria la longitud del array
-                let data := add(slot, 0x20) // avanzamos a la posicion de memoria del primer elemento
-                maxVal := sload(data)
-                minVal := sload(data)
-                let i := 1
-
-
-                for {} lt(i, len) { i := add(i, 1) } {
-                    let elem := sload(add(data, mul(i, 0x20))) // cargamos el siguiente elemento
-                    if gt(elem, maxVal) { // si es mayor el elemento q el maximo -> es el maximo
+                for {let i := 1} lt(i,len) { i := add(i,1) } {
+                    let elem := sload(add(slot, i))
+                     if gt(elem, maxVal) { // si es mayor el elemento q el maximo -> es el maximo
                         maxVal := elem
                     }
                     if lt(elem, minVal) { // si es menor el elemento que el minimo -> es el minimo
@@ -39,10 +45,8 @@ contract lab6ex6 {
                 }
             }
 
-            let maxVal, minVal := fmaxmin(arr.slot)
+            let maxVal, minVal := fmaxmin(loc, arr.slot)
             maxmin := sub(maxVal, minVal)
         }
-
-        return maxmin;
     }
 }
