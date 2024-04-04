@@ -20,6 +20,11 @@ contract QuadraticVoting {
         bool accepted;
     }
 
+    struct Participant {
+        uint nTokens;
+        uint value;
+    }
+
     address payable owner;
 
     uint private weiPrice;
@@ -29,8 +34,8 @@ contract QuadraticVoting {
 
     bool open;
 
-    mapping (address => bool) participants;
-    mapping (uint => Proposal) proposals; // (ptoposalId -> Proposal)
+    mapping (address => Participant) participants; // (address participante -> Participant)
+    mapping (uint => Proposal) proposals; // (proposalId -> Proposal)
 
     constructor(uint _weiPrice, uint _nMaxTokens) {
         gestorToken = new myERC20("token", "tok");
@@ -70,7 +75,17 @@ contract QuadraticVoting {
     }
 
     modifier existParticipant() {
-        require(participants[msg.sender] == true, "must exist the participant");
+        require(participants[msg.sender].nTokens >= 1, "must exist the participant");
+        _;
+    }
+
+    modifier enoughTokens(uint n) {
+        require(participants[msg.sender].nTokens >= n, "Not enough tokens");
+        _;
+    }
+
+    modifier proposalExist(uint id) {
+        require(id < nProposals, "Proposal does not exist");
         _;
     }
 
@@ -83,58 +98,107 @@ contract QuadraticVoting {
     }
 
     function addParticipant() external payable positiveValue {
-        require(participants[msg.sender] == true, "addParticipant");
+        require(participants[msg.sender].nTokens == 0, "this account already exist");
         require(msg.value >= weiPrice, "Not enough money");
-        participants[msg.sender] = true;
+
         uint value = msg.value;
-        if (value >= weiPrice) {
-            gestorToken.newToken(msg.sender, weiPrice);
-            value -= weiPrice;
-        }
+        gestorToken.newToken(msg.sender, weiPrice);
+        value -= weiPrice;
+        participants[msg.sender].nTokens = 1;
+        participants[msg.sender].value = value;
+
     }
 
     function removeParticipant() external payable existParticipant{
         
         //participants[msg.sender] = false;
-        uint value = msg.value;
         //he intentado devolverle el dinero que tenia al borrarse pero no se si es asi
         // o lo ponemos como false para que no pueda actuar pero complicaría el addParticipant habría que ver si esta en false o no existe
-        payable(msg.sender).transfer(value);
+        payable(msg.sender).transfer(participants[msg.sender].value);
+
+        for(uint i = 0; i < participants[msg.sender].nTokens; i++){ // TODO al cancelar su participacion se venden sus tokens??
+            payable(msg.sender).transfer(weiPrice);
+        }
+
+        // TODO borrar los tokens que le pertenecen
+
         delete(participants[msg.sender]);
     }
 
     function addProposal(string memory pName, string memory pDesc, uint pBudget , address pRec) external votingIsOpen returns(uint Id){
-        require(pBudget >= 0, "budget must be positive");
+        require(pBudget >= 0, "budget must be positive"); // TODO comprobar que solo es 0 si la descripcion es signaling
         require(pRec != address(0), "receptor address can not be zero");
         Id = nProposals;
         nProposals++;
 
         proposals[Id] = Proposal({name: pName, desc: pDesc, budget: pBudget, rec:pRec, accepted:false});
 
-        emit ProposalCreated(Id, pName); // no se si hay que hacerlos
+        emit ProposalCreated(Id, pName); // TODO no se si hay que hacerlos
     }
 
     function cancelProposal(uint pId) external votingIsOpen propOwner(pId){
         nProposals--;
         delete(proposals[pId]);
 
-        emit ProposalCanceled(pId); // no se si hay que hacerlos
+        emit ProposalCanceled(pId); // TODO no se si hay que hacerlos
     }
 
     function buyTokens(uint n) external payable existParticipant{
-        uint value = msg.value;
 
-        for(uint i = 0; i < n && value >= weiPrice; i++){
+        for(uint i = 0; i < n && participants[msg.sender].value >= weiPrice; i++){
             gestorToken.newToken(msg.sender, weiPrice);
-            value -= weiPrice;
+            participants[msg.sender].value -= weiPrice;
         }
 
     }
 
-    function sellTokens() external payable existParticipant{
-        //gestorToken.Transfer(from, to, value); No se como devolver el token
-        payable(msg.sender).transfer(weiPrice);
+    function sellTokens(uint n) external payable existParticipant enoughTokens(n){
+        //gestorToken.Transfer(from, to, value); TODO No se como devolver el token
+        for(uint i = 0; i < n; i++){ // TODO al cancelar su participacion se venden sus tokens??
+            payable(msg.sender).transfer(weiPrice);
+        }
 
+    }
+
+    function getERC20() external returns (address){
+        //TODO
+    }
+
+    function getPendingProposals() external view votingIsOpen returns(uint[] memory pending){
+        //recorro el mapa como array porque su clave es un id que comienza en 0 y tenemos en tamaño del mapa en nProposals
+        uint x = 0;
+        for(uint i = 0; i < nProposals; i++){
+            if(!proposals[i].accepted && proposals[i].budget > 0){ // financing tiene presupuesto > 0 y signaling == 0
+                pending[x] = i;
+                x++;
+            } 
+        }
+    }
+
+    function getApprovedProposals() external view votingIsOpen returns(uint[] memory pending){
+        //recorro el mapa como array porque su clave es un id que comienza en 0 y tenemos en tamaño del mapa en nProposals
+        uint x = 0;
+        for(uint i = 0; i < nProposals; i++){
+            if(proposals[i].accepted && proposals[i].budget > 0){ // financing tiene presupuesto > 0 y signaling == 0
+                pending[x] = i;
+                x++;
+            } 
+        }
+    }
+
+    function getSignalingProposals() external view votingIsOpen returns (uint[] memory pending){
+        //recorro el mapa como array porque su clave es un id que comienza en 0 y tenemos en tamaño del mapa en nProposals
+        uint x = 0;
+        for(uint i = 0; i < nProposals; i++){
+            if(proposals[i].budget == 0){ // financing tiene presupuesto > 0 y signaling == 0
+                pending[x] = i;
+                x++;
+            }
+        }
+    }
+
+    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (Proposal memory p){
+        p = proposals[id];
     }
 
 
