@@ -7,15 +7,12 @@ interface IExecutableProposal {
     function executeProposal(uint proposalId, uint numVotes, uint numTokens) external payable;
 }
 
-contract Exec is IExecutableProposal { // NI IDEA DE COMO HACERLO
+contract ExecProposal is IExecutableProposal { // NI IDEA DE COMO HACERLO
 
-    address rec;
+    event ProposalExecuted(address prop_addr, uint proposalId, uint numVotes, uint numTokens, uint balance);
 
-    constructor(address _rec){
-        rec = _rec;
-    }
-    function executeProposal(uint proposalId, uint numVotes, uint numTokens) external payable override {       
-        payable(rec).transfer(numTokens); //TODO probablemente no sea así
+    function executeProposal(uint proposalId, uint numVotes, uint numTokens) external payable override {
+        emit ProposalExecuted(address(this), proposalId, numVotes, numTokens, address(this).balance);
     }
 }
 
@@ -26,21 +23,22 @@ contract QuadraticVoting {
 
     struct Participant {
         uint nTokens;
-        uint value;
         mapping(uint => uint) pVotes; // pId -> votos
     }
 
     struct Proposal {
         string name;
         string desc;
-        uint256 budget;
-        address rec;
+        uint256 budget; // presupuesto en ether propuesta
+        address owner;
         uint votes;
+        uint nTokens;
         bool accepted;
         bool cancel;
         uint threshold;
         uint nParts;
         address[] parts; //participantes
+        IExecutableProposal addr;
     }
 
     //TODO La proposal estaba en un struct pero apartado 2.1 entiendo que dice q es un contrato que implementa a IExecutableProposal pero no se
@@ -54,6 +52,10 @@ contract QuadraticVoting {
     uint private nParticipants;
     uint private nPendingProp;
 
+    uint[] financingProposalsPend;
+    uint[] signalingProposals;
+    uint[] approvedProposals;
+
 
     bool open;
 
@@ -61,9 +63,9 @@ contract QuadraticVoting {
     mapping (uint => Proposal) proposals; // (proposalId -> Proposal)
 
     constructor(uint _weiPrice, uint _nMaxTokens) {
-        gestorToken = new myERC20("token", "tok");
         weiPrice = _weiPrice;
         nMaxTokens = _nMaxTokens;
+        gestorToken = new myERC20(nMaxTokens);
         open = false;
         nProposals = 0;
         nParticipants = 0;
@@ -93,8 +95,13 @@ contract QuadraticVoting {
         _;
     }
 
+    modifier votingIsClose {
+        require(open == false, "Voting is open");
+        _;
+    }
+
     modifier propOwner(uint pId) {
-        require(proposals[pId].rec == msg.sender, "Must be de owner of the proposal");
+        require(proposals[pId].owner == msg.sender, "Must be de owner of the proposal");
         _;
     }
 
@@ -108,10 +115,6 @@ contract QuadraticVoting {
         _;
     }
 
-    modifier enoughValue(uint n) {
-        require(participants[msg.sender].value >= n*weiPrice, "Not enough tokens");
-        _;
-    }
     modifier proposalExist(uint id) {
         require(id < nProposals && proposals[id].cancel == false, "Proposal does not exist");
         _;
@@ -137,116 +140,168 @@ contract QuadraticVoting {
         _;
     }
 
+    modifier notRegisteredPart() {
+        require(participants[msg.sender].nTokens == 0, "this account already exist");
+        _;
+    }
+
     // ===================================== FUNCIONES =====================================
 
-    function openVoting(uint initBudget) public onlyOwner {
-        require(initBudget >= 0, "Budget must be a positive number");
-        totalBudget = initBudget;
+    function openVoting() external payable onlyOwner votingIsClose {
+        require(msg.value > 0, "Budget must be a positive number");
+        totalBudget = msg.value;
         open = true;
     }
 
-    function addParticipant() external payable positiveValue {
-        require(participants[msg.sender].nTokens == 0, "this account already exist");
+    function addParticipant() external payable  notRegisteredPart positiveValue {
         require(msg.value >= weiPrice, "Not enough money");
 
-        uint value = msg.value;
-        gestorToken.newToken(msg.sender, weiPrice);
-        value -= weiPrice;
-        participants[msg.sender].nTokens = 1;
-        participants[msg.sender].value = value;
+        uint tokens = msg.value / weiPrice;
+        participants[msg.sender].nTokens = tokens;
         nParticipants++;
+        gestorToken.newTokens(msg.sender, tokens);
 
     }
 
-    function removeParticipant() external payable existParticipant{
-        
-        //participants[msg.sender] = false;
-        //he intentado devolverle el dinero que tenia al borrarse pero no se si es asi
-        // o lo ponemos como false para que no pueda actuar pero complicaría el addParticipant habría que ver si esta en false o no existe
-        payable(msg.sender).transfer(participants[msg.sender].value);
+    function removeParticipantNotApprovedProposals(uint[] storage arr) private returns(uint eth, uint tokens){
+        uint length = arr.length;
+        uint recuperar = 0;
 
-        for(uint i = 0; i < participants[msg.sender].nTokens; i++){ // TODO al cancelar su participacion se venden sus tokens??
-            payable(msg.sender).transfer(weiPrice);
+        for(uint i = 0; i < length; i++){
+            uint id = arr[i];
+            uint votes = participants[msg.sender].pVotes[id];
+            if(votes != 0){ //tiene votos en esa propuesta
+                recuperar =  votes**2;
+                tokens += recuperar;
+                eth += recuperar * weiPrice;
+
+                proposals[id].votes -= votes;
+                proposals[id].nTokens -= recuperar;
+
+                delete participants[msg.sender].pVotes[id];
+            }
         }
+    }
 
-        // TODO borrar los tokens que le pertenecen
+    function removeParticipant() external payable existParticipant{
+        uint eth;
+        uint tokens;
+        uint fEth;
+        uint fTokens;
+
         nParticipants--;
         delete(participants[msg.sender]);
+        
+        (fEth, fTokens) = removeParticipantNotApprovedProposals(financingProposalsPend);
+        (eth, tokens) = removeParticipantNotApprovedProposals(signalingProposals);
+
+        delete participants[msg.sender];
+
+        eth += fEth;
+        tokens += fTokens;
+
+        if(tokens != 0){
+            gestorToken.deleteTokens(address(this), tokens);
+        }        
+        if(eth != 0){
+            payable(msg.sender).transfer(eth);
+        }
+
+
     }
 
     function addProposal(string memory pName, string memory pDesc, uint pBudget , address pRec) external votingIsOpen returns(uint Id){
         require(pBudget >= 0, "budget must be positive"); // TODO comprobar que solo es 0 si la descripcion es signaling
         require(pRec != address(0), "receptor address can not be zero");
+
+        bool isNewAddr = true;
+
+        for(uint i = 0; i < nProposals; i++){
+            if(address(proposals[Id].owner) == pRec){
+                isNewAddr = false;
+                break;
+            }
+        }
+
+        require(isNewAddr, "This proposal exists");
+
         Id = nProposals;
         nProposals++;
-        proposals[Id] = Proposal({name:pName, desc:pDesc, budget:pBudget, rec:pRec, votes:0, accepted:false, cancel:false, threshold:0, nParts:0, parts: new address[](0)});
+        proposals[Id] = Proposal({name:pName, desc:pDesc, budget:pBudget, owner:msg.sender, votes:0,nTokens:0, accepted:false, cancel:false, threshold:0, nParts:0, parts: new address[](0), addr:IExecutableProposal(pRec)});
 
-        emit ProposalCreated(Id, pName); // TODO no se si hay que hacerlos
+        if(proposals[Id].budget == 0){
+            signalingProposals.push(Id);
+        }
+        else {
+            financingProposalsPend.push(Id);
+        }
+    }
+
+    function delPropArray(uint pId, uint[] storage arr) private {
+        uint i = 0;
+        bool found = false;
+        uint length = arr.length;
+        
+        for(i; i < length && !found; i++){
+            if(arr[i] == pId){
+                found = true;
+            }
+        }
+        if(found){// lo paso a ultima posicion y ultimo a su posicion y hago pop
+            arr[i] = arr[length - 1];
+            arr.pop();
+        }
     }
 
     function cancelProposal(uint pId) external votingIsOpen proposalExist(pId) propOwner(pId){
+        
         proposals[pId].cancel = true;
+
+        if(proposals[pId].budget == 0){
+            delPropArray(pId, signalingProposals);
+        }
+        else{
+             delPropArray(pId, financingProposalsPend);
+        }
         //delete(proposals[pId]);
         //emit ProposalCanceled(pId); // TODO no se si hay que hacerlos
     }
 
-    function buyTokens(uint n) external payable existParticipant enoughValue(n){
+    function buyTokens() external payable existParticipant {
         // TODO no se como hacerlo, si pasandole cuantos quieres, si de uno en uno o todos los posibles
         // en caso de pasando los que quieres como este caso, si no hay suficiente dinero para los n decir que no hay dinero
         // o comprar los posibles -> && participants[msg.sender].value >= weiPrice
-        for(uint i = 0; i < n ; i++){
-            gestorToken.newToken(msg.sender, weiPrice);
-            participants[msg.sender].value -= weiPrice;
-            participants[msg.sender].nTokens++;
-        }
+        uint nTokens = msg.value/weiPrice;
+        gestorToken.newTokens(msg.sender, nTokens);
+        participants[msg.sender].nTokens += nTokens;
 
     }
 
-    function sellTokens(uint n) external payable existParticipant enoughTokens(n){
+    function sellTokens() external payable existParticipant {
         //gestorToken.Transfer(from, to, value); TODO No se como devolver el token
-        for(uint i = 0; i < n; i++){ // TODO al cancelar su participacion se venden sus tokens??
-            participants[msg.sender].value += weiPrice;
-            participants[msg.sender].nTokens--;
-        }
+        uint balance = gestorToken.balanceOf(msg.sender);
+        participants[msg.sender].nTokens -= balance;
+        gestorToken.deleteTokens(msg.sender, balance);
+        uint recuperar = balance * weiPrice; 
+        require(address(this).balance >= recuperar, "Not enough ether to sell tokens.");
+        payable(msg.sender).transfer(recuperar);
 
     }
 
     function getERC20() external view returns (address){
-        //TODO esto no es asi verdad?
         return address(gestorToken);
     }
 
     function getPendingProposals() public view votingIsOpen returns(uint[] memory pending){
-        //recorro el mapa como array porque su clave es un id que comienza en 0 y tenemos en tamaño del mapa en nProposals
-        uint x = 0;
-        for(uint i = 0; i < nProposals; i++){
-            if(!proposals[i].accepted && proposals[i].budget > 0 && !proposals[i].cancel){ // financing tiene presupuesto > 0 y signaling == 0
-                pending[x] = i;
-                x++;
-            } 
-        }
+        return financingProposalsPend;
     }
 
     function getApprovedProposals() public view votingIsOpen returns(uint[] memory pending){
-        //recorro el mapa como array porque su clave es un id que comienza en 0 y tenemos en tamaño del mapa en nProposals
-        uint x = 0;
-        for(uint i = 0; i < nProposals; i++){
-            if(proposals[i].accepted && proposals[i].budget > 0){ // financing tiene presupuesto > 0 y signaling == 0
-                pending[x] = i;
-                x++;
-            } 
-        }
+        return approvedProposals;
     }
-    //TODO estos get son public???
+    
     function getSignalingProposals() public view votingIsOpen returns (uint[] memory pending){
-        //recorro el mapa como array porque su clave es un id que comienza en 0 y tenemos en tamaño del mapa en nProposals
-        uint x = 0;
-        for(uint i = 0; i < nProposals; i++){
-            if((proposals[i].budget) == 0){ // financing tiene presupuesto > 0 y signaling == 0
-                pending[x] = i;
-                x++;
-            }
-        }
+        return signalingProposals;        
     }
 
     function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (Proposal memory p){
@@ -255,7 +310,7 @@ contract QuadraticVoting {
 
     // a MISMA PROPUESTA: primer voto  1 token segundo voto 4 tercer voto 9...
     // a distintas propuestas cada voto a cada propuesta 1 token 
-    function stake(uint pId, uint votes) external notAceptedProposal(pId) proposalExist(pId) positiveVotesNotZero(votes) {
+    function stake(uint pId, uint votes) external existParticipant votingIsOpen notAceptedProposal(pId) proposalExist(pId) positiveVotesNotZero(votes) {
         uint gasto = votes;
         uint voted = participants[msg.sender].pVotes[pId];
         
@@ -264,7 +319,13 @@ contract QuadraticVoting {
         require(participants[msg.sender].nTokens >= gasto, "Not enough tokens to vote this proposal");
         // la debe realizar el participante con el contrato ERC20 antes de ejecutar esta funcion;
         // el contrato ERC20 se puede obtener con getERC20). 
-        gestorToken.approveTokens(msg.sender, proposals[pId].rec, gasto); // TODO si los transfiero aqui hace falta comprobarlo??
+        // gestorToken.approveTokens(msg.sender, proposals[pId].rec, gasto); // TODO si los transfiero aqui hace falta comprobarlo??
+        require(gestorToken.checkApprovement(msg.sender, address(this), gasto), "Not enough tokens approved");
+        
+        gestorToken.transferFrom(msg.sender, address(this), gasto);
+        proposals[pId].votes += votes;
+        proposals[pId].nTokens += gasto;
+        participants[msg.sender].nTokens -= gasto; // gasto los tokens
         participants[msg.sender].pVotes[pId] += votes; // cuantos votos tengo en esa propuesta
 
         if(voted == 0){
@@ -272,16 +333,10 @@ contract QuadraticVoting {
             proposals[pId].parts.push(msg.sender);
         }
 
-        uint newVotes = proposals[pId].votes + votes;
-
-        proposals[pId].votes = newVotes; // realizo la votación
-        participants[msg.sender].nTokens -= gasto; // gasto los tokens
-
-        uint ratio = (proposals[pId].budget * 100) / totalBudget;
-        uint presupuesto = ((2 + ratio) * nParticipants) / 10 + nPendingProp; // no se si es equivalente pero no se puede hacer directamente
-
-
+        uint presupuesto = ((totalBudget + 10*proposals[pId].budget) / (10 * totalBudget)) * nParticipants + nPendingProp;
         proposals[pId].threshold = presupuesto; // actualizo el umbral ya que recibe votos
+
+        if(proposals[pId].budget != 0) _checkAndExecuteProposal(pId);
         
     }
 
@@ -298,6 +353,8 @@ contract QuadraticVoting {
         participants[msg.sender].pVotes[pId] -= votes;
         participants[msg.sender].nTokens += recuperar;
 
+        gestorToken.transfer(msg.sender, recuperar);
+
         if(votosP == votes) { // si retiro TODOS los votos le saco de los participantes de esa propuesta
             uint nParts = proposals[pId].nParts;
             bool b = false;
@@ -311,31 +368,30 @@ contract QuadraticVoting {
             proposals[pId].nParts--;
         }
 
-        // recalcular umbral tras retirar votos?? pone solo al recibir
+        proposals[pId].votes -= votes;
+        proposals[pId].nTokens -= recuperar;
+
+        if(proposals[pId].budget != 0){
+            _checkAndExecuteProposal(pId);
+        }
 
     }
 
-    function _checkAndExecuteProposal(uint pId) internal isFinancingProp(pId) {
-        uint presupuesto = proposals[pId].votes + participants[owner].value;
-        require(presupuesto >= proposals[pId].budget, "No enough money to finance propousal");
-
-        //uint umbral = ((0.2 + (proposals[pId].getBudget() / presupuesto))*nParticipants) + nPendingProp;
-        // proposals[pId].setThreshold(presupuesto, nParticipants, nPendingProp);
-
+    function _checkAndExecuteProposal(uint pId) internal proposalExist(pId) notAceptedProposal(pId) isFinancingProp(pId) {
+        require(address(this).balance >= proposals[pId].budget, "No enough money to finance propousal");
         require(proposals[pId].votes > proposals[pId].threshold, "Not enough votes to pass the threshold");
 
-        uint gasto = proposals[pId].budget - proposals[pId].votes; // TODO ns si se restan los votos como que todos han sido solo 1 token o llevar el numero de tokens y eso es lo q restar
-        totalBudget -= gasto; // al aprovar la propuesta restamos al presupuesto lo que cuesta la propuesta aprovada
+        delPropArray(pId, financingProposalsPend);
+        approvedProposals.push(pId);
 
-        // TODO no hace falta quitar los votos a las propuestas en los participantes ya que cuando se compruebe la propuesta estara aceptada?? 
+        totalBudget = totalBudget - proposals[pId].budget + (weiPrice*proposals[pId].nTokens);
+        gestorToken.deleteTokens(address(this), proposals[pId].nTokens);
+
+        require(address(this).balance >= proposals[pId].budget, "Not enough wei");
+        (IExecutableProposal(proposals[pId].addr)).executeProposal{value: proposals[pId].budget, gas: 100000}(pId, proposals[pId].votes, proposals[pId].nTokens);
 
         proposals[pId].accepted = true;
 
-        Exec rec = new Exec(proposals[pId].rec);
-
-        rec.executeProposal(pId, proposals[pId].votes, proposals[pId].budget);
-
-        //  limitar la cantidad maxima de gas de la funcion a 100.000 en contrato externo
     }
 
     function returnTokensF() internal {
@@ -375,28 +431,48 @@ contract QuadraticVoting {
         }
     }
 
-    function returnBudget() internal {
-        participants[msg.sender].value += totalBudget;
-    }
-
-    function closeVoting() external onlyOwner {
+    function closeVoting() external onlyOwner { //falta por hacer
         open = false;
 
         returnTokensF();
         acceptAndReturnS();
-        returnBudget();
  
     }
 }
 
 contract myERC20 is ERC20 {
-    constructor(string memory name, string memory symb) ERC20(name, symb) {}
 
-    function newToken(address account, uint value) external {
-        _mint(account, value);
+    address private owner;
+    uint maxTokens;
+
+    constructor(uint _tMax) ERC20("token", "tok") {
+        require(_tMax > 0, "Provided max number of tokens == 0, invalid.");
+        maxTokens = _tMax;
+        owner = msg.sender;
     }
 
-    function approveTokens(address owner, address pOwner, uint value) external {
-        _approve(owner, pOwner, value);
+    //--------------------------------------- MODIFIERS --------------------------------------
+
+    // -------------------------------------- FUNCIONES --------------------------------------
+    // FALTAN MODIFIERS
+    function newTokens(address account, uint nTokens) external {
+        require(nTokens + totalSupply() <= maxTokens, "You can not create this tokens, you are exceeding maxTokens");
+        _mint(account, nTokens);
     }
+
+    function deleteTokens(address account, uint nTokens) external {
+        require(totalSupply() >= nTokens, "Not enough tokens to delete");
+        _burn(account, nTokens);
+    }
+
+    function deleteAllTokens(address account) external {
+        uint balance = balanceOf(account);
+        require(balance > 0, "You do not have balance to eliminate tokens");
+        _burn(account, balance);
+    }
+
+    function checkApprovement(address from, address to, uint nTokens) external view returns (bool){
+        return allowance(from, to) >= nTokens;
+    }
+
 }
