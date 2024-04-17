@@ -145,6 +145,11 @@ contract QuadraticVoting {
         _;
     }
 
+    modifier enoughMoneyToBuy() {
+        require(msg.value >= weiPrice, "Not enough money");
+        _;
+    }
+
     // ===================================== FUNCIONES =====================================
 
     function openVoting() external payable onlyOwner votingIsClose {
@@ -153,9 +158,7 @@ contract QuadraticVoting {
         open = true;
     }
 
-    function addParticipant() external payable  notRegisteredPart positiveValue {
-        require(msg.value >= weiPrice, "Not enough money");
-
+    function addParticipant() external payable  notRegisteredPart positiveValue enoughMoneyToBuy {
         uint tokens = msg.value / weiPrice;
         participants[msg.sender].nTokens = tokens;
         nParticipants++;
@@ -210,7 +213,7 @@ contract QuadraticVoting {
 
     }
 
-    function addProposal(string memory pName, string memory pDesc, uint pBudget , address pRec) external votingIsOpen returns(uint Id){
+    function addProposal(string memory pName, string memory pDesc, uint pBudget , address pRec) external votingIsOpen existParticipant returns(uint Id){
         require(pBudget >= 0, "budget must be positive"); // TODO comprobar que solo es 0 si la descripcion es signaling
         require(pRec != address(0), "receptor address can not be zero");
 
@@ -253,9 +256,27 @@ contract QuadraticVoting {
         }
     }
 
-    function cancelProposal(uint pId) external votingIsOpen proposalExist(pId) propOwner(pId){
+    function returnTokensProposal(uint pId) private {
+        uint length = proposals[pId].parts.length;
+
+        for(uint i = 0; i < length; i++){
+            address part = proposals[pId].parts[i];
+            uint votes = participants[part].pVotes[pId];
+            if(votes != 0){
+                uint recuperar = votes**2; // al cuadrado directamente porque devuelve todos
+                participants[part].nTokens += recuperar;
+                gestorToken.transfer(part, recuperar);
+                delete proposals[pId].parts[i];
+                delete participants[part].pVotes[pId];
+            }
+        }
+    }
+
+    function cancelProposal(uint pId) external votingIsOpen proposalExist(pId) propOwner(pId) notAceptedProposal(pId) {
         
         proposals[pId].cancel = true;
+
+        returnTokensProposal(pId);
 
         if(proposals[pId].budget == 0){
             delPropArray(pId, signalingProposals);
@@ -267,7 +288,7 @@ contract QuadraticVoting {
         //emit ProposalCanceled(pId); // TODO no se si hay que hacerlos
     }
 
-    function buyTokens() external payable existParticipant {
+    function buyTokens() external payable existParticipant enoughMoneyToBuy {
         // TODO no se como hacerlo, si pasandole cuantos quieres, si de uno en uno o todos los posibles
         // en caso de pasando los que quieres como este caso, si no hay suficiente dinero para los n decir que no hay dinero
         // o comprar los posibles -> && participants[msg.sender].value >= weiPrice
@@ -280,11 +301,11 @@ contract QuadraticVoting {
     function sellTokens() external payable existParticipant {
         //gestorToken.Transfer(from, to, value); TODO No se como devolver el token
         uint balance = gestorToken.balanceOf(msg.sender);
-        participants[msg.sender].nTokens -= balance;
+        participants[msg.sender].nTokens -= balance; //TODO estoy llevando los tokens pero en realidad hace falta? con el gestorToken????
         gestorToken.deleteTokens(msg.sender, balance);
-        uint recuperar = balance * weiPrice; 
-        require(address(this).balance >= recuperar, "Not enough ether to sell tokens.");
-        payable(msg.sender).transfer(recuperar);
+        uint recuperarETH = balance * weiPrice; 
+        require(address(this).balance >= recuperarETH, "Not enough ether to sell tokens.");
+        payable(msg.sender).transfer(recuperarETH);
 
     }
 
@@ -333,10 +354,17 @@ contract QuadraticVoting {
             proposals[pId].parts.push(msg.sender);
         }
 
-        uint presupuesto = ((totalBudget + 10*proposals[pId].budget) / (10 * totalBudget)) * nParticipants + nPendingProp;
+        // multiplico arriba y abajo por 10 y hago que 0,2 + (budget[i] / totalBudget)
+        // pase a (0,2*totalBudget + budget[i]) / totalBudget
+        // finalmente multiplico por 10 para evitar que de 0 por la division
+        // (2*totalBudget + 10*budget[i]) / 10*totalBudget
+
+        uint presupuesto = ((2*totalBudget + 10*proposals[pId].budget) / (10 * totalBudget)) * nParticipants + nPendingProp; 
         proposals[pId].threshold = presupuesto; // actualizo el umbral ya que recibe votos
 
-        if(proposals[pId].budget != 0) _checkAndExecuteProposal(pId);
+        if(proposals[pId].budget != 0) {
+            _checkAndExecuteProposal(pId);
+        }
         
     }
 
@@ -349,9 +377,6 @@ contract QuadraticVoting {
             uint res = votosP - votes;
             recuperar = votosP**2 - res**2;
         }
-
-        participants[msg.sender].pVotes[pId] -= votes;
-        participants[msg.sender].nTokens += recuperar;
 
         gestorToken.transfer(msg.sender, recuperar);
 
@@ -370,6 +395,8 @@ contract QuadraticVoting {
 
         proposals[pId].votes -= votes;
         proposals[pId].nTokens -= recuperar;
+        participants[msg.sender].pVotes[pId] -= votes;
+        participants[msg.sender].nTokens += recuperar;
 
         if(proposals[pId].budget != 0){
             _checkAndExecuteProposal(pId);
@@ -394,48 +421,33 @@ contract QuadraticVoting {
 
     }
 
-    function returnTokensF() internal {
-
-        uint[] memory pending = getPendingProposals();
-
-        for(uint i = 0; i < pending.length; i++){
-            for(uint j = 0; j < proposals[pending[i]].nParts; j++){
-                //cada participante que haya votado a cada propuesta pendiente recibe sus tokens
-                uint recuperar = participants[proposals[pending[i]].parts[j]].pVotes[pending[i]];
-                if(recuperar > 1){
-                    recuperar = recuperar**2;
-                }
-                participants[proposals[pending[i]].parts[j]].nTokens += recuperar;
-                participants[proposals[pending[i]].parts[j]].pVotes[pending[i]] = 0;
-            }
-        }
-
-    }
-
-    function acceptAndReturnS() internal {
-        uint[] memory signaling = getSignalingProposals();
-
-        for(uint i = 0; i < signaling.length; i++){
-            proposals[signaling[i]].accepted = true;
-
-            for(uint j = 0; j < proposals[signaling[i]].nParts; j++){
-                //cada participante que haya votado a cada propuesta pendiente recibe sus tokens
-                uint recuperar = participants[proposals[signaling[i]].parts[j]].pVotes[signaling[i]];
-                if(recuperar > 1){
-                    recuperar = recuperar**2;
-                }
-                participants[proposals[signaling[i]].parts[j]].nTokens += recuperar;
-                participants[proposals[signaling[i]].parts[j]].pVotes[signaling[i]] = 0;
-            }
-
-        }
-    }
-
     function closeVoting() external onlyOwner { //falta por hacer
         open = false;
 
-        returnTokensF();
-        acceptAndReturnS();
+        uint length = signalingProposals.length;
+
+        for(uint i = 0; i < length; i++){
+            uint pId = signalingProposals[i];
+            proposals[pId].accepted = true;
+            returnTokensProposal(pId);
+            (IExecutableProposal(proposals[pId].addr)).executeProposal(pId, proposals[pId].votes, proposals[pId].nTokens);
+        }
+        
+        length = financingProposalsPend.length;
+
+        for(uint i = 0; i < length; i++){
+            uint pId = financingProposalsPend[i];
+            returnTokensProposal(pId);
+        }
+
+        delete signalingProposals;
+        delete financingProposalsPend;
+        delete approvedProposals;
+
+        if(totalBudget > 0) {
+            owner.transfer(totalBudget);
+            delete totalBudget;
+        }
  
     }
 }
