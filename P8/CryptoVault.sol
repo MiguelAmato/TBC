@@ -148,8 +148,7 @@ contract Attack2 { // Parity wallet
         return address (this).balance;
     }
 
-        receive() external payable {}
-    }
+    receive() external payable {}
 
 }
 
