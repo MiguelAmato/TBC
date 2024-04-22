@@ -7,7 +7,7 @@ interface IExecutableProposal {
     function executeProposal(uint proposalId, uint numVotes, uint numTokens) external payable;
 }
 
-contract ExecProposal is IExecutableProposal { // NI IDEA DE COMO HACERLO
+contract ExecProposal is IExecutableProposal {
 
     event ProposalExecuted(address prop_addr, uint proposalId, uint numVotes, uint numTokens, uint balance);
 
@@ -71,12 +71,6 @@ contract QuadraticVoting {
         nParticipants = 0;
         owner = payable(msg.sender);
     }
-
-    // ===================================== EVENTS =====================================
-
-    event ProposalCreated(uint indexed proposalId, string title);
-    //event ProposalCanceled(uint indexed proposalId);
-    event ProposalExecuted(uint indexed proposalId, uint amountSent);
 
     // ===================================== MODIFIERS =====================================
 
@@ -147,6 +141,7 @@ contract QuadraticVoting {
 
     modifier enoughMoneyToBuy() {
         require(msg.value >= weiPrice, "Not enough money");
+        require(msg.value % weiPrice == 0, "Must be enough money to buy an exact number of tokens");
         _;
     }
 
@@ -293,13 +288,12 @@ contract QuadraticVoting {
         // en caso de pasando los que quieres como este caso, si no hay suficiente dinero para los n decir que no hay dinero
         // o comprar los posibles -> && participants[msg.sender].value >= weiPrice
         uint nTokens = msg.value/weiPrice;
-        gestorToken.newTokens(msg.sender, nTokens);
+        gestorToken.newTokens(msg.sender, nTokens); // no hace falta comprobar maxTokens ya que se comprueba en funcion newTokens en MyERC20
         participants[msg.sender].nTokens += nTokens;
 
     }
 
-    function sellTokens() external payable existParticipant {
-        //gestorToken.Transfer(from, to, value); TODO No se como devolver el token
+    function sellTokens() external existParticipant {
         uint balance = gestorToken.balanceOf(msg.sender);
         participants[msg.sender].nTokens -= balance; //TODO estoy llevando los tokens pero en realidad hace falta? con el gestorToken????
         gestorToken.deleteTokens(msg.sender, balance);
@@ -340,7 +334,7 @@ contract QuadraticVoting {
         require(participants[msg.sender].nTokens >= gasto, "Not enough tokens to vote this proposal");
         // la debe realizar el participante con el contrato ERC20 antes de ejecutar esta funcion;
         // el contrato ERC20 se puede obtener con getERC20). 
-        // gestorToken.approveTokens(msg.sender, proposals[pId].rec, gasto); // TODO si los transfiero aqui hace falta comprobarlo??
+        //gestorToken.approve(address(this) , gasto); // TODO si los transfiero aqui hace falta comprobarlo??
         require(gestorToken.checkApprovement(msg.sender, address(this), gasto), "Not enough tokens approved");
         
         gestorToken.transferFrom(msg.sender, address(this), gasto);
@@ -465,14 +459,31 @@ contract myERC20 is ERC20 {
 
     //--------------------------------------- MODIFIERS --------------------------------------
 
+    modifier onlyOwner {
+        require(msg.sender == owner, "Must be the Owner of myERC20");
+        _;
+    }
+
+    modifier oneOrMoreTokens(uint nTokens) {
+        require(nTokens > 0, "nTokens to create must be bigger than zero");
+        _;
+    }
+
+    modifier OwnerOrTokenOwner(address tkOwner) {
+        require((msg.sender == tkOwner) || (msg.sender == owner), "Must be the token Owner or the Owner of myERC20");
+        _;
+
+    }
+
+
     // -------------------------------------- FUNCIONES --------------------------------------
-    // FALTAN MODIFIERS
-    function newTokens(address account, uint nTokens) external {
+
+    function newTokens(address account, uint nTokens) external onlyOwner oneOrMoreTokens(nTokens){
         require(nTokens + totalSupply() <= maxTokens, "You can not create this tokens, you are exceeding maxTokens");
         _mint(account, nTokens);
     }
 
-    function deleteTokens(address account, uint nTokens) external {
+    function deleteTokens(address account, uint nTokens) external oneOrMoreTokens(nTokens) {
         require(totalSupply() >= nTokens, "Not enough tokens to delete");
         _burn(account, nTokens);
     }
