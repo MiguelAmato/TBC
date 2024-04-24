@@ -319,8 +319,10 @@ contract QuadraticVoting {
         return signalingProposals;        
     }
 
-    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (Proposal memory p){
-        p = proposals[id];
+    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory name, string memory desc, uint votes){
+        name = proposals[id].name;
+        desc = proposals[id].desc;
+        votes = proposals[id].votes;
     }
 
     // a MISMA PROPUESTA: primer voto  1 token segundo voto 4 tercer voto 9...
@@ -331,10 +333,10 @@ contract QuadraticVoting {
         
         if(votes > 1 || voted > 1) gasto = votes**2;
 
-        require(participants[msg.sender].nTokens >= gasto, "Not enough tokens to vote this proposal");
+        //require(participants[msg.sender].nTokens >= gasto, "Not enough tokens to vote this proposal");
         // la debe realizar el participante con el contrato ERC20 antes de ejecutar esta funcion;
         // el contrato ERC20 se puede obtener con getERC20). 
-        //gestorToken.approve(address(this) , gasto); // TODO si los transfiero aqui hace falta comprobarlo??
+        // gestorToken.approve(address(this) , gasto); // TODO si los transfiero aqui hace falta comprobarlo??
         require(gestorToken.checkApprovement(msg.sender, address(this), gasto), "Not enough tokens approved");
         
         gestorToken.transferFrom(msg.sender, address(this), gasto);
@@ -399,19 +401,19 @@ contract QuadraticVoting {
     }
 
     function _checkAndExecuteProposal(uint pId) internal proposalExist(pId) notAceptedProposal(pId) isFinancingProp(pId) {
-        require(address(this).balance >= proposals[pId].budget, "No enough money to finance propousal");
-        require(proposals[pId].votes > proposals[pId].threshold, "Not enough votes to pass the threshold");
 
-        delPropArray(pId, financingProposalsPend);
-        approvedProposals.push(pId);
+        if((address(this).balance >= proposals[pId].budget) && (proposals[pId].votes > proposals[pId].threshold)){
+            delPropArray(pId, financingProposalsPend);
+            approvedProposals.push(pId);
 
-        totalBudget = totalBudget - proposals[pId].budget + (weiPrice*proposals[pId].nTokens);
-        gestorToken.deleteTokens(address(this), proposals[pId].nTokens);
+            totalBudget = totalBudget - proposals[pId].budget + (weiPrice*proposals[pId].nTokens);
+            gestorToken.deleteTokens(address(this), proposals[pId].nTokens);
 
-        require(address(this).balance >= proposals[pId].budget, "Not enough wei");
-        (IExecutableProposal(proposals[pId].addr)).executeProposal{value: proposals[pId].budget, gas: 100000}(pId, proposals[pId].votes, proposals[pId].nTokens);
+            require(address(this).balance >= proposals[pId].budget, "Not enough wei");
+            (IExecutableProposal(proposals[pId].addr)).executeProposal{value: proposals[pId].budget, gas: 100000}(pId, proposals[pId].votes, proposals[pId].nTokens);
 
-        proposals[pId].accepted = true;
+            proposals[pId].accepted = true;
+        }
 
     }
 
