@@ -125,7 +125,7 @@ contract QuadraticVoting {
     }
 
     modifier notAceptedProposal(uint pId) {
-        require(!proposals[pId].accepted, "You can not retire your votes from an acepted proposal");
+        require(!proposals[pId].accepted, "You can not interactuate with an acepted proposal");
         _;
     }
 
@@ -246,7 +246,10 @@ contract QuadraticVoting {
             }
         }
         if(found){// lo paso a ultima posicion y ultimo a su posicion y hago pop
-            arr[i] = arr[length - 1];
+            for (i; i < length - 1; i++){
+                arr[i] = arr[i + 1];
+            }
+            delete arr[length - 1];
             arr.pop();
         }
     }
@@ -319,10 +322,31 @@ contract QuadraticVoting {
         return signalingProposals;        
     }
 
-    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory name, string memory desc, uint votes){
-        name = proposals[id].name;
-        desc = proposals[id].desc;
-        votes = proposals[id].votes;
+    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory, string memory){
+        return (proposals[id].name, proposals[id].desc);
+    }
+
+    function getProposalAccepted(uint pId) external view returns (bool){
+        return proposals[pId].accepted;
+    }
+
+    function getProposalThreshold(uint pId) external view returns (uint){
+        return proposals[pId].threshold;
+    }
+
+    function getProposalVotes(uint pId) external view returns (uint){
+        return proposals[pId].votes;
+    }
+
+    function getProposalTokens(uint pId) external view returns (uint){
+        return proposals[pId].nTokens;
+    }
+
+    function getProposalnParts(uint pId) external view returns (uint){
+        return proposals[pId].nParts;
+    }
+    function getProposalCanceles(uint pId) external view returns (bool){
+        return proposals[pId].cancel;
     }
 
     // a MISMA PROPUESTA: primer voto  1 token segundo voto 4 tercer voto 9...
@@ -350,13 +374,13 @@ contract QuadraticVoting {
             proposals[pId].parts.push(msg.sender);
         }
 
-        // multiplico arriba y abajo por 10 y hago que 0,2 + (budget[i] / totalBudget)
+        // hago que 0,2 + (budget[i] / totalBudget)
         // pase a (0,2*totalBudget + budget[i]) / totalBudget
         // finalmente multiplico por 10 para evitar que de 0 por la division
         // (2*totalBudget + 10*budget[i]) / 10*totalBudget
+        // realizamos el producto antes de la division para que el resultado no sea 0
 
-        uint presupuesto = ((2*totalBudget + 10*proposals[pId].budget) / (10 * totalBudget)) * nParticipants + nPendingProp; 
-        proposals[pId].threshold = presupuesto; // actualizo el umbral ya que recibe votos
+        proposals[pId].threshold = ((2*totalBudget + 10*proposals[pId].budget) * proposals[pId].nParts)  / 10 * totalBudget + nPendingProp; // actualizo el umbral ya que recibe votos
 
         if(proposals[pId].budget != 0) {
             _checkAndExecuteProposal(pId);
