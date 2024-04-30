@@ -41,8 +41,6 @@ contract QuadraticVoting {
         IExecutableProposal addr;
     }
 
-    //TODO La proposal estaba en un struct pero apartado 2.1 entiendo que dice q es un contrato que implementa a IExecutableProposal pero no se
-
     address payable owner;
 
     uint private weiPrice;
@@ -50,7 +48,6 @@ contract QuadraticVoting {
     uint private totalBudget;
     uint private nProposals;
     uint private nParticipants;
-    uint private nPendingProp;
 
     uint[] financingProposalsPend;
     uint[] signalingProposals;
@@ -145,6 +142,36 @@ contract QuadraticVoting {
         _;
     }
 
+    // ===================================== GETTERS PRUEBAS ============================
+
+    function getProposalAccepted(uint pId) external view returns (bool){
+        return proposals[pId].accepted;
+    }
+
+    function getProposalThreshold(uint pId) external view returns (uint){
+        return proposals[pId].threshold;
+    }
+
+    function getProposalVotes(uint pId) external view returns (uint){
+        return proposals[pId].votes;
+    }
+
+    function getProposalTokens(uint pId) external view returns (uint){
+        return proposals[pId].nTokens;
+    }
+
+    function getProposalnParts(uint pId) external view returns (uint){
+        return proposals[pId].nParts;
+    }
+    function getProposalCanceles(uint pId) external view returns (bool){
+        return proposals[pId].cancel;
+    }
+
+    function getTotalBudget() external view returns (uint) {
+        return totalBudget;
+    }
+
+
     // ===================================== FUNCIONES =====================================
 
     function openVoting() external payable onlyOwner votingIsClose {
@@ -209,7 +236,7 @@ contract QuadraticVoting {
     }
 
     function addProposal(string memory pName, string memory pDesc, uint pBudget , address pRec) external votingIsOpen existParticipant returns(uint Id){
-        require(pBudget >= 0, "budget must be positive"); // TODO comprobar que solo es 0 si la descripcion es signaling
+        require(pBudget >= 0, "budget must be positive");
         require(pRec != address(0), "receptor address can not be zero");
 
         bool isNewAddr = true;
@@ -282,14 +309,9 @@ contract QuadraticVoting {
         else{
              delPropArray(pId, financingProposalsPend);
         }
-        //delete(proposals[pId]);
-        //emit ProposalCanceled(pId); // TODO no se si hay que hacerlos
     }
 
     function buyTokens() external payable existParticipant enoughMoneyToBuy {
-        // TODO no se como hacerlo, si pasandole cuantos quieres, si de uno en uno o todos los posibles
-        // en caso de pasando los que quieres como este caso, si no hay suficiente dinero para los n decir que no hay dinero
-        // o comprar los posibles -> && participants[msg.sender].value >= weiPrice
         uint nTokens = msg.value/weiPrice;
         gestorToken.newTokens(msg.sender, nTokens); // no hace falta comprobar maxTokens ya que se comprueba en funcion newTokens en MyERC20
         participants[msg.sender].nTokens += nTokens;
@@ -298,7 +320,7 @@ contract QuadraticVoting {
 
     function sellTokens() external existParticipant {
         uint balance = gestorToken.balanceOf(msg.sender);
-        participants[msg.sender].nTokens -= balance; //TODO estoy llevando los tokens pero en realidad hace falta? con el gestorToken????
+        participants[msg.sender].nTokens -= balance; 
         gestorToken.deleteTokens(msg.sender, balance);
         uint recuperarETH = balance * weiPrice; 
         require(address(this).balance >= recuperarETH, "Not enough ether to sell tokens.");
@@ -322,32 +344,10 @@ contract QuadraticVoting {
         return signalingProposals;        
     }
 
-    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory, string memory){
+    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory, string memory){ //TODO PROBAR
         return (proposals[id].name, proposals[id].desc);
     }
 
-    function getProposalAccepted(uint pId) external view returns (bool){
-        return proposals[pId].accepted;
-    }
-
-    function getProposalThreshold(uint pId) external view returns (uint){
-        return proposals[pId].threshold;
-    }
-
-    function getProposalVotes(uint pId) external view returns (uint){
-        return proposals[pId].votes;
-    }
-
-    function getProposalTokens(uint pId) external view returns (uint){
-        return proposals[pId].nTokens;
-    }
-
-    function getProposalnParts(uint pId) external view returns (uint){
-        return proposals[pId].nParts;
-    }
-    function getProposalCanceles(uint pId) external view returns (bool){
-        return proposals[pId].cancel;
-    }
 
     // a MISMA PROPUESTA: primer voto  1 token segundo voto 4 tercer voto 9...
     // a distintas propuestas cada voto a cada propuesta 1 token 
@@ -355,12 +355,11 @@ contract QuadraticVoting {
         uint gasto = votes;
         uint voted = participants[msg.sender].pVotes[pId];
         
-        if(votes > 1 || voted > 1) gasto = votes**2;
+        if(votes > 1 || voted > 1) gasto = (votes + voted)**2; //para que no te deje en distintas veces votar si no tienes suficiente
 
         //require(participants[msg.sender].nTokens >= gasto, "Not enough tokens to vote this proposal");
         // la debe realizar el participante con el contrato ERC20 antes de ejecutar esta funcion;
         // el contrato ERC20 se puede obtener con getERC20). 
-        // gestorToken.approve(address(this) , gasto); // TODO si los transfiero aqui hace falta comprobarlo??
         require(gestorToken.checkApprovement(msg.sender, address(this), gasto), "Not enough tokens approved");
         
         gestorToken.transferFrom(msg.sender, address(this), gasto);
@@ -380,7 +379,7 @@ contract QuadraticVoting {
         // (2*totalBudget + 10*budget[i]) / 10*totalBudget
         // realizamos el producto antes de la division para que el resultado no sea 0
 
-        proposals[pId].threshold = ((2*totalBudget + 10*proposals[pId].budget) * proposals[pId].nParts)  / 10 * totalBudget + nPendingProp; // actualizo el umbral ya que recibe votos
+        proposals[pId].threshold = ((totalBudget + 5*proposals[pId].budget) *nParticipants) / (5*totalBudget) + financingProposalsPend.length; // actualizo el umbral ya que recibe votos
 
         if(proposals[pId].budget != 0) {
             _checkAndExecuteProposal(pId);
