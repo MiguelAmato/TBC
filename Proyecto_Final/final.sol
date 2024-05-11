@@ -136,14 +136,14 @@ contract QuadraticVoting {
         _;
     }
 
-    modifier enoughMoneyToBuy() { //suficietne dinero para comprar al menos 1 token
-        require(msg.value >= weiPrice, "Not enough money");
+    modifier enoughMoneyToBuy() { //suficietne dinero para comprar al menos 1 token y que sean un numero exacto de tokens
+        require(msg.value >= weiPrice, "Not enough eth to buy at least one token");
         _;
     }
 
     // ===================================== GETTERS PRUEBAS ============================
 
-    function getProposalAccepted(uint pId) external view returns (bool){
+    /*function getProposalAccepted(uint pId) external view returns (bool){
         return proposals[pId].accepted;
     }
 
@@ -168,7 +168,7 @@ contract QuadraticVoting {
 
     function getTotalBudget() external view returns (uint) {
         return totalBudget;
-    }
+    } */
 
 
     // ===================================== FUNCIONES =====================================
@@ -208,7 +208,7 @@ contract QuadraticVoting {
         }
     }
 
-    function removeParticipant() external payable existParticipant{ //eliminamos a un participante
+    function removeParticipant() external existParticipant{ //eliminamos a un participante
         uint eth;
         uint tokens;
         uint fEth;
@@ -316,11 +316,11 @@ contract QuadraticVoting {
         uint nTokens = msg.value/weiPrice;
         gestorToken.newTokens(msg.sender, nTokens); // no hace falta comprobar maxTokens ya que se comprueba en funcion newTokens en MyERC20
         participants[msg.sender].nTokens += nTokens;
-
     }
 
     function sellTokens() external existParticipant { //vendemos tokens restantes
         uint balance = gestorToken.balanceOf(msg.sender); //tokens que tiene el participante
+        require(balance > 0, "tokens must be bigger than zero"); // debe tener al menos 1 token
         gestorToken.deleteTokens(msg.sender, balance); // los elimina
         participants[msg.sender].nTokens -= balance; 
         uint recuperarETH = balance * weiPrice; 
@@ -446,7 +446,7 @@ contract QuadraticVoting {
         for(uint i = 0; i < length; i++){ // se recorre el array de signaling, se devuelven los tokens, se aprueban y se ejecutan
             uint pId = signalingProposals[i];
             proposals[pId].accepted = true;
-            returnTokensProposal(pId);
+            returnTokensProposal(pId); // devolvemos los tokens usados en la propuesta signalinf
             (IExecutableProposal(proposals[pId].addr)).executeProposal(pId, proposals[pId].votes, proposals[pId].nTokens);
         }
         
@@ -454,7 +454,7 @@ contract QuadraticVoting {
 
         for(uint i = 0; i < length; i++){ // se recorren las financing y se decuelcen los tokens de las no aprobadas
             uint pId = financingProposalsPend[i];
-            returnTokensProposal(pId);
+            returnTokensProposal(pId); // devolvemos los tokens utilizados en la propuesta financing
         }
 
         delete signalingProposals;
@@ -469,6 +469,8 @@ contract QuadraticVoting {
         for(uint i = 0; i < nProposals; i++){ // vaciamos el mapa de proposals
             delete proposals[i];
         }
+
+        nProposals = 0; // al cerrar la votacion se vuelve a empezar de 0 el id de las proposals
  
     }
 }
