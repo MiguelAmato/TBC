@@ -16,7 +16,6 @@ contract ExecProposal is IExecutableProposal {
     }
 }
 
-
 contract QuadraticVoting {
 
     myERC20 private gestorToken;
@@ -62,7 +61,7 @@ contract QuadraticVoting {
     constructor(uint _weiPrice, uint _nMaxTokens) {
         weiPrice = _weiPrice;
         nMaxTokens = _nMaxTokens;
-        gestorToken = new myERC20(nMaxTokens);
+        gestorToken = new myERC20(_weiPrice, nMaxTokens);
         open = false;
         nProposals = 0;
         nParticipants = 0;
@@ -137,7 +136,7 @@ contract QuadraticVoting {
     }
 
     modifier enoughMoneyToBuy() { //suficietne dinero para comprar al menos 1 token y que sean un numero exacto de tokens
-        require(msg.value >= weiPrice, "Not enough eth to buy at least one token");
+        require(msg.value >= gestorToken.getWeiPrice(), "Not enough eth to buy at least one token");
         _;
     }
 
@@ -180,25 +179,25 @@ contract QuadraticVoting {
     }
 
     function addParticipant() external payable  notRegisteredPart positiveValue enoughMoneyToBuy { //añadimos un participante a la votacion
-        uint tokens = msg.value / weiPrice;
+        uint tokens = msg.value / gestorToken.getWeiPrice(); // numero de tokens que puedo comprar con el dinero disponible
         gestorToken.newTokens(msg.sender, tokens); //el gestor de tokens crea los nuevos tokens comprados comprobando si se pueden crear
         participants[msg.sender].nTokens = tokens;
         participants[msg.sender].exist = true;
-        nParticipants++;
+        nParticipants++; // aumento el numero de participantes
     }
 
     function removeParticipantNotApprovedProposals(uint[] storage arr) private returns(uint eth, uint tokens){ //eliminamos los participantes de las propuestas no aprobadas
-        uint length = arr.length;
+        uint length = arr.length; // longitud del array de las propuestas sin aceptar
         uint recuperar = 0; //numero de tokens a recuperar de la propuesta
 
         for(uint i = 0; i < length; i++){
             recuperar = 0;
-            uint id = arr[i];
+            uint id = arr[i]; // id de la propuesta
             uint votes = participants[msg.sender].pVotes[id]; //numero de votos del participante en esa propuesta
             if(votes != 0){ //tiene votos en esa propuesta
                 recuperar =  votes**2; // recuperamos el numero de tokens cuadratico a los votos
                 tokens += recuperar;
-                eth += recuperar * weiPrice; // ether recuperado por tokens con el precio de cada token
+                eth += recuperar * gestorToken.getWeiPrice(); // ether recuperado por tokens con el precio de cada token
 
                 proposals[id].votes -= votes;
                 proposals[id].nTokens -= recuperar;
@@ -214,16 +213,16 @@ contract QuadraticVoting {
         uint fEth;
         uint fTokens;
 
-        nParticipants--;
-        participants[msg.sender].exist = false;
+        nParticipants--; // un participante menos
+        participants[msg.sender].exist = false; // deja de existir el participante
         
-        (fEth, fTokens) = removeParticipantNotApprovedProposals(financingProposalsPend);// rliminamos y recuperamos tokens y eth de todas las propuestas financing pending 
-        (eth, tokens) = removeParticipantNotApprovedProposals(signalingProposals); // rliminamos y recuperamos tokens y eth de todas las propuestas signaling pending
+        (fEth, fTokens) = removeParticipantNotApprovedProposals(financingProposalsPend);// eliminamos y recuperamos tokens y eth de todas las propuestas financing pending 
+        (eth, tokens) = removeParticipantNotApprovedProposals(signalingProposals); // eliminamos y recuperamos tokens y eth de todas las propuestas signaling pending
 
         delete participants[msg.sender]; //eliminamos al participante
 
-        eth += fEth;
-        tokens += fTokens;
+        eth += fEth; // sumamos el eth de las signaling con las financing
+        tokens += fTokens; // sumamos los tokens de las signaling con las financing
 
         if(tokens != 0){
             gestorToken.deleteTokens(address(this), tokens); // si ha recuperado algun token se eliminan
@@ -232,12 +231,11 @@ contract QuadraticVoting {
             payable(msg.sender).transfer(eth); // si ha recuperado eth se devuelve
         }
 
-
     }
 
     function addProposal(string memory pName, string memory pDesc, uint pBudget , address pRec) external votingIsOpen existParticipant returns(uint Id){ // creamos nueva propuesta
-        require(pBudget >= 0, "budget must be positive");
-        require(pRec != address(0), "receptor address can not be zero");
+        require(pBudget >= 0, "budget must be positive"); // el presupuesto de la propuesta debe ser 0 (signaling) o mayor (financing)
+        require(pRec != address(0), "receptor address can not be zero"); // el receptor debe ser un address valido
 
         bool isNewAddr = true;
 
@@ -248,7 +246,7 @@ contract QuadraticVoting {
             }
         }
 
-        require(isNewAddr, "This proposal exists");
+        require(isNewAddr, "This proposal exists"); //comprobamos si era nueva
 
         Id = nProposals;
         nProposals++;
@@ -264,8 +262,8 @@ contract QuadraticVoting {
 
     function delPropArray(uint pId, uint[] storage arr) private { // eliminamos una propuesta de alguno de los arrays
         uint i = 0;
-        bool found = false;
-        uint length = arr.length;
+        bool found = false; // tratamos de localizar la propuesta en el array
+        uint length = arr.length; // longitud del array al que queremos borrar la propuesta
         
         for(i; i < length && !found; i++){
             if(arr[i] == pId){
@@ -273,7 +271,7 @@ contract QuadraticVoting {
             }
         }
         i--;
-        if(found){// lo paso a ultima posicion y ultimo a su posicion y hago pop
+        if(found){// adelanto a todos los que van detras una posicion para eliminarla y hago pop al ultimo
             for (i; i < length - 1; i++){
                 arr[i] = arr[i + 1];
             }
@@ -283,7 +281,7 @@ contract QuadraticVoting {
     }
 
     function returnTokensProposal(uint pId) private { //devolvemos los tokens de las propuestas asus participantes
-        uint length = proposals[pId].parts.length;
+        uint length = proposals[pId].parts.length; // longitud del array de participantes que han votado esa propuesta
 
         for(uint i = 0; i < length; i++){
             address part = proposals[pId].parts[i]; // participante que pertenece a la propuesta
@@ -291,7 +289,7 @@ contract QuadraticVoting {
             if(votes != 0){
                 uint recuperar = votes**2; // al cuadrado directamente porque devuelve todos
                 participants[part].nTokens += recuperar;
-                gestorToken.transfer(part, recuperar);
+                gestorToken.transfer(part, recuperar); // transferimos los tokens al participante
                 delete proposals[pId].parts[i]; // eliminamos al participante de la propuesta
                 delete participants[part].pVotes[pId]; // quitamos los votos a esa propuesta del participante
             }
@@ -300,20 +298,20 @@ contract QuadraticVoting {
 
     function cancelProposal(uint pId) external votingIsOpen proposalExist(pId) propOwner(pId) notAceptedProposal(pId) { // cancelamos la propuesta
         
-        proposals[pId].cancel = true;
+        proposals[pId].cancel = true; // se cancela la propuesta
 
         returnTokensProposal(pId); // devolvemos los tokens de la propuesta
 
         if(proposals[pId].budget == 0){
-            delPropArray(pId, signalingProposals); // la eliminamos del array en el que se encuentre
+            delPropArray(pId, signalingProposals); // la eliminamos del array en el que se encuentre (signaling)
         }
         else{
-            delPropArray(pId, financingProposalsPend);
+            delPropArray(pId, financingProposalsPend);// la eliminamos del array en el que se encuentre (financing)
         }
     }
 
     function buyTokens() external payable existParticipant enoughMoneyToBuy { //compramos mas tokens
-        uint nTokens = msg.value/weiPrice;
+        uint nTokens = msg.value/gestorToken.getWeiPrice(); // numero de tokens que puedo comprar con el value
         gestorToken.newTokens(msg.sender, nTokens); // no hace falta comprobar maxTokens ya que se comprueba en funcion newTokens en MyERC20
         participants[msg.sender].nTokens += nTokens;
     }
@@ -323,7 +321,7 @@ contract QuadraticVoting {
         require(balance > 0, "tokens must be bigger than zero"); // debe tener al menos 1 token
         gestorToken.deleteTokens(msg.sender, balance); // los elimina
         participants[msg.sender].nTokens -= balance; 
-        uint recuperarETH = balance * weiPrice; 
+        uint recuperarETH = balance * gestorToken.getWeiPrice(); // eth recuperado al vender los tokens
         require(address(this).balance >= recuperarETH, "Not enough ether to sell tokens.");
         payable(msg.sender).transfer(recuperarETH); //recupera el eth
 
@@ -361,13 +359,13 @@ contract QuadraticVoting {
         require(gestorToken.checkApprovement(msg.sender, address(this), gasto), "Not enough tokens approved"); // comprobamos si hay suficientes tokens aprobados
         
         gestorToken.transferFrom(msg.sender, address(this), gasto); // transferimos los tokens al contrato de votacion cuadratica
-        proposals[pId].votes += votes;
-        proposals[pId].nTokens += gasto;
+        proposals[pId].votes += votes; // aumento votos de la propuesta
+        proposals[pId].nTokens += gasto; // aumento tokens de la propuesta
         participants[msg.sender].nTokens -= gasto; // gasto los tokens
         participants[msg.sender].pVotes[pId] += votes; // cuantos votos tengo en esa propuesta
 
         if(voted == 0){ // si es la primera vez que vota en esta propuesta añadimos al participante
-            proposals[pId].nParts++;
+            proposals[pId].nParts++; 
             proposals[pId].parts.push(msg.sender);
         }
 
@@ -386,28 +384,29 @@ contract QuadraticVoting {
     }
 
     function withdrawFromProposal(uint votes, uint pId) external notAceptedProposal(pId) proposalExist(pId) positiveVotesNotZero(votes) enoughVotes(votes,pId){
-
+        // recuperar los votos de una propuesta a la que hayas votado y no haya sido aceptada todavia
         uint recuperar = votes;
-        uint votosP = participants[msg.sender].pVotes[pId];
+        uint votosP = participants[msg.sender].pVotes[pId]; // votos realizados a esa propuesta
 
-        if(votosP > 1) {
-            uint res = votosP - votes;
+        if(votosP > 1) { // si se habia votado mas de un voto en esa propuesta recuperacion cuadratica
+            uint res = votosP - votes; // votos que te quedan tras quitar los votos
             recuperar = votosP**2 - res**2;
         }
 
-        gestorToken.transfer(msg.sender, recuperar);
+        gestorToken.transfer(msg.sender, recuperar); // se transfieren los tokens al participante de nuevo
 
         if(votosP == votes) { // si retiro TODOS los votos le saco de los participantes de esa propuesta
-            uint nParts = proposals[pId].nParts;
-            bool b = false;
+            uint nParts = proposals[pId].nParts; // numero de participantes en esta propuesta
+            bool b = false; // buscamos este participante en la propuesta
             for(uint i = 0; i < nParts && !b; i++){
                 if(address(msg.sender) == address(proposals[pId].parts[i])){
-                    proposals[pId].parts[i] = proposals[pId].parts[nParts - 1];
+                    proposals[pId].parts[i] = proposals[pId].parts[nParts - 1]; //cambiamos ultimo valido a la posicion de este 
                     proposals[pId].parts.pop();
                     b = true;
                 }   
             }
-            proposals[pId].nParts--;
+
+            if(b) proposals[pId].nParts--; // si ha sido encontrado se resta el nuemro de participanted en esta propuesta
         }
 
         proposals[pId].votes -= votes;
@@ -427,10 +426,10 @@ contract QuadraticVoting {
             delPropArray(pId, financingProposalsPend); // se elimina de pending
             approvedProposals.push(pId); // se añade en aprobadas
 
-            totalBudget = totalBudget - proposals[pId].budget + (weiPrice*proposals[pId].nTokens); // actualizamos presupuesto total
+            totalBudget = totalBudget - proposals[pId].budget + (gestorToken.getWeiPrice()*proposals[pId].nTokens); // actualizamos presupuesto total
             gestorToken.deleteTokens(address(this), proposals[pId].nTokens); // eliminamos los tokens consumidos
 
-            require(address(this).balance >= proposals[pId].budget, "Not enough budget");
+            require(address(this).balance >= proposals[pId].budget, "Not enough budget"); // suficiente presupuesto para ejecutar la propesta
             (IExecutableProposal(proposals[pId].addr)).executeProposal{value: proposals[pId].budget, gas: 100000}(pId, proposals[pId].votes, proposals[pId].nTokens); // se ejecuta la propuesta
 
             proposals[pId].accepted = true; // se aprueba
@@ -444,8 +443,8 @@ contract QuadraticVoting {
         uint length = signalingProposals.length;
 
         for(uint i = 0; i < length; i++){ // se recorre el array de signaling, se devuelven los tokens, se aprueban y se ejecutan
-            uint pId = signalingProposals[i];
-            proposals[pId].accepted = true;
+            uint pId = signalingProposals[i]; // id propuesta signaling
+            proposals[pId].accepted = true; // se aceptan las signaling
             returnTokensProposal(pId); // devolvemos los tokens usados en la propuesta signalinf
             (IExecutableProposal(proposals[pId].addr)).executeProposal(pId, proposals[pId].votes, proposals[pId].nTokens);
         }
@@ -453,7 +452,7 @@ contract QuadraticVoting {
         length = financingProposalsPend.length;
 
         for(uint i = 0; i < length; i++){ // se recorren las financing y se decuelcen los tokens de las no aprobadas
-            uint pId = financingProposalsPend[i];
+            uint pId = financingProposalsPend[i]; // id propuesta financing
             returnTokensProposal(pId); // devolvemos los tokens utilizados en la propuesta financing
         }
 
@@ -479,10 +478,13 @@ contract myERC20 is ERC20 {
 
     address private owner;
     uint maxTokens;
+    uint weiPrice;
 
-    constructor(uint _tMax) ERC20("token", "tok") {
-        require(_tMax > 0, "Provided max number of tokens == 0, invalid.");
+    constructor(uint _weiPrice, uint _tMax) ERC20("token", "tok") {
+        require(_tMax > 0, "maxTokens must be bigger than 0");
+        require(_weiPrice > 0, "weiPrice must be bigger than 0");
         maxTokens = _tMax;
+        weiPrice = _weiPrice;
         owner = msg.sender;
     }
 
@@ -525,6 +527,10 @@ contract myERC20 is ERC20 {
 
     function checkApprovement(address from, address to, uint nTokens) external view returns (bool){ // comprueba si hay suficientes tokens aprobados
         return allowance(from, to) >= nTokens;
+    }
+
+    function getWeiPrice() external view returns (uint) { // devuelve el precio en weis de cada token
+        return weiPrice;
     }
 
 }
