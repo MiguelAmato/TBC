@@ -35,7 +35,7 @@ contract QuadraticVoting {
         uint nTokens;
         bool accepted;
         bool cancel;
-        uint threshold;
+        uint threshold; // umbral
         uint nParts;
         address[] parts; //participantes
         IExecutableProposal addr;
@@ -139,36 +139,6 @@ contract QuadraticVoting {
         require(msg.value >= gestorToken.getWeiPrice(), "Not enough eth to buy at least one token");
         _;
     }
-
-    // ===================================== GETTERS PRUEBAS ============================
-
-    /*function getProposalAccepted(uint pId) external view returns (bool){
-        return proposals[pId].accepted;
-    }
-
-    function getProposalThreshold(uint pId) external view returns (uint){
-        return proposals[pId].threshold;
-    }
-
-    function getProposalVotes(uint pId) external view returns (uint){
-        return proposals[pId].votes;
-    }
-
-    function getProposalTokens(uint pId) external view returns (uint){
-        return proposals[pId].nTokens;
-    }
-
-    function getProposalnParts(uint pId) external view returns (uint){
-        return proposals[pId].nParts;
-    }
-    function getProposalCanceles(uint pId) external view returns (bool){
-        return proposals[pId].cancel;
-    }
-
-    function getTotalBudget() external view returns (uint) {
-        return totalBudget;
-    } */
-
 
     // ===================================== FUNCIONES =====================================
 
@@ -343,8 +313,15 @@ contract QuadraticVoting {
         return signalingProposals;        
     }
 
-    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory, string memory){ //TODO PROBAR deuvelve nombre y descripcion
-        return (proposals[id].name, proposals[id].desc);
+    function getProposalInfo(uint id) external view votingIsOpen proposalExist(id) returns (string memory name, string memory desc, uint256 budget, uint votes, uint nTokens, bool accepted, bool cancel, uint threshold){ //TODO PROBAR deuvelve nombre y descripcion
+        name = proposals[id].name;
+        desc = proposals[id].desc;
+        budget = proposals[id].budget;
+        votes = proposals[id].votes;
+        nTokens = proposals[id].nTokens;
+        accepted = proposals[id].accepted;
+        cancel= proposals[id].cancel;
+        threshold = proposals[id].threshold;
     }
 
 
